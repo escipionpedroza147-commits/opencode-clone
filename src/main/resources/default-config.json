@@ -1,0 +1,26 @@
+{
+  "provider": {
+    "type": "openrouter",
+    "base_url": "https://openrouter.ai/api/v1",
+    "model": "google/gemma-4-31b-it:free",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "agents": {
+    "build": {
+      "description": "Full-access coding agent with all tools",
+      "tools": ["file_read", "file_write", "bash", "search"],
+      "read_only": false
+    },
+    "plan": {
+      "description": "Read-only analysis and planning agent",
+      "tools": ["file_read", "search"],
+      "read_only": true
+    },
+    "general": {
+      "description": "General-purpose subagent for complex searches and multistep tasks",
+      "tools": ["file_read", "bash", "search"],
+      "read_only": false
+    }
+  }
+}
