@@ -12,6 +12,7 @@ public class CommandRegistry {
         this.app = app;
         this.commands = new LinkedHashMap<>();
         registerDefaults();
+        registerUserCommands();
     }
 
     private void registerDefaults() {
@@ -21,6 +22,28 @@ public class CommandRegistry {
         register(new QuitCommand());
         register(new ModelCommand(app));
         register(new AgentsCommand(app));
+    }
+
+    /**
+     * Load user-defined commands from config.
+     * These are defined in opencode.json under "commands": { ... }
+     */
+    private void registerUserCommands() {
+        Map<String, Map<String, String>> userCmds = app.getConfig().getUserCommands();
+        if (userCmds == null || userCmds.isEmpty()) return;
+
+        for (Map.Entry<String, Map<String, String>> entry : userCmds.entrySet()) {
+            String name = entry.getKey();
+            Map<String, String> def = entry.getValue();
+            String description = def.get("description");
+            String script = def.get("script");
+            int timeout = 60;
+            if (def.containsKey("timeout")) {
+                try { timeout = Integer.parseInt(def.get("timeout")); } catch (NumberFormatException ignored) {}
+            }
+            register(new UserCommand(name, description, script,
+                    app.getConfig().getWorkingDirectory(), timeout));
+        }
     }
 
     public void register(Command command) {

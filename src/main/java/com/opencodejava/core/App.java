@@ -4,6 +4,7 @@ import com.opencodejava.agent.AgentManager;
 import com.opencodejava.command.CommandRegistry;
 import com.opencodejava.provider.ProviderFactory;
 import com.opencodejava.provider.LLMProvider;
+import com.opencodejava.skill.SkillRegistry;
 import com.opencodejava.tool.ToolRegistry;
 import com.opencodejava.ui.TerminalUI;
 
@@ -11,6 +12,7 @@ public class App {
     private final Config config;
     private final SessionManager sessionManager;
     private final ToolRegistry toolRegistry;
+    private final SkillRegistry skillRegistry;
     private final CommandRegistry commandRegistry;
     private final AgentManager agentManager;
     private final LLMProvider provider;
@@ -23,8 +25,10 @@ public class App {
 
         this.sessionManager = new SessionManager(config);
         this.toolRegistry = new ToolRegistry(config);
+        this.skillRegistry = SkillRegistry.createDefault(
+                config.getWorkingDirectory(), config.getUserSkills());
         this.provider = ProviderFactory.create(config.getProviderConfig());
-        this.agentManager = new AgentManager(config, provider, toolRegistry, sessionManager);
+        this.agentManager = new AgentManager(config, provider, toolRegistry, sessionManager, skillRegistry);
         this.commandRegistry = new CommandRegistry(this);
         this.ui = new TerminalUI(this);
     }
@@ -37,6 +41,7 @@ public class App {
     public Config getConfig() { return config; }
     public SessionManager getSessionManager() { return sessionManager; }
     public ToolRegistry getToolRegistry() { return toolRegistry; }
+    public SkillRegistry getSkillRegistry() { return skillRegistry; }
     public CommandRegistry getCommandRegistry() { return commandRegistry; }
     public AgentManager getAgentManager() { return agentManager; }
     public LLMProvider getProvider() { return provider; }

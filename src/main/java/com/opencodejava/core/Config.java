@@ -18,6 +18,8 @@ public class Config {
 
     private ProviderConfig providerConfig;
     private Map<String, AgentConfig> agents;
+    private Map<String, Map<String, String>> userCommands;
+    private Map<String, Map<String, String>> userSkills;
     private String workingDirectory;
     private String dataDirectory;
     private String activeProvider;
@@ -25,6 +27,8 @@ public class Config {
 
     private Config() {
         this.agents = new LinkedHashMap<>();
+        this.userCommands = new LinkedHashMap<>();
+        this.userSkills = new LinkedHashMap<>();
         this.workingDirectory = System.getProperty("user.dir");
         this.dataDirectory = System.getProperty("user.home") + "/.opencode-java";
         loadDefaults();
@@ -157,6 +161,38 @@ public class Config {
             workingDirectory = root.get("working_directory").asText();
         }
 
+        // Load user-defined commands
+        if (root.has("commands")) {
+            JsonNode cmdsNode = root.get("commands");
+            Iterator<Map.Entry<String, JsonNode>> cmdFields = cmdsNode.fields();
+            while (cmdFields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = cmdFields.next();
+                Map<String, String> cmdDef = new LinkedHashMap<>();
+                JsonNode cmdNode = entry.getValue();
+                if (cmdNode.has("description")) cmdDef.put("description", cmdNode.get("description").asText());
+                if (cmdNode.has("script")) cmdDef.put("script", cmdNode.get("script").asText());
+                if (cmdNode.has("timeout")) cmdDef.put("timeout", cmdNode.get("timeout").asText());
+                userCommands.put(entry.getKey(), cmdDef);
+            }
+        }
+
+        // Load user-defined skills
+        if (root.has("skills")) {
+            JsonNode skillsNode = root.get("skills");
+            Iterator<Map.Entry<String, JsonNode>> skillFields = skillsNode.fields();
+            while (skillFields.hasNext()) {
+                Map.Entry<String, JsonNode> entry = skillFields.next();
+                Map<String, String> skillDef = new LinkedHashMap<>();
+                JsonNode skillNode = entry.getValue();
+                if (skillNode.has("description")) skillDef.put("description", skillNode.get("description").asText());
+                if (skillNode.has("type")) skillDef.put("type", skillNode.get("type").asText());
+                if (skillNode.has("script")) skillDef.put("script", skillNode.get("script").asText());
+                if (skillNode.has("system_prompt")) skillDef.put("system_prompt", skillNode.get("system_prompt").asText());
+                if (skillNode.has("timeout")) skillDef.put("timeout", skillNode.get("timeout").asText());
+                userSkills.put(entry.getKey(), skillDef);
+            }
+        }
+
         activeModel = providerConfig.getModel();
         activeProvider = providerConfig.getType();
     }
@@ -186,6 +222,8 @@ public class Config {
 
     public ProviderConfig getProviderConfig() { return providerConfig; }
     public Map<String, AgentConfig> getAgents() { return agents; }
+    public Map<String, Map<String, String>> getUserCommands() { return userCommands; }
+    public Map<String, Map<String, String>> getUserSkills() { return userSkills; }
     public String getWorkingDirectory() { return workingDirectory; }
     public String getDataDirectory() { return dataDirectory; }
     public String getActiveProvider() { return activeProvider; }

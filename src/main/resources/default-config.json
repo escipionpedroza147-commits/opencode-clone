@@ -2,25 +2,44 @@
   "provider": {
     "type": "openrouter",
     "base_url": "https://openrouter.ai/api/v1",
-    "model": "google/gemma-4-31b-it:free",
+    "model": "anthropic/claude-sonnet-4",
     "temperature": 0.7,
-    "max_tokens": 4096
+    "max_tokens": 16384
   },
   "agents": {
     "build": {
       "description": "Full-access coding agent with all tools",
-      "tools": ["file_read", "file_write", "bash", "search"],
+      "tools": ["file_read", "file_write", "file_edit", "bash", "search", "list_files", "git"],
       "read_only": false
     },
     "plan": {
       "description": "Read-only analysis and planning agent",
-      "tools": ["file_read", "search"],
+      "tools": ["file_read", "search", "list_files"],
       "read_only": true
     },
     "general": {
       "description": "General-purpose subagent for complex searches and multistep tasks",
-      "tools": ["file_read", "bash", "search"],
+      "tools": ["file_read", "bash", "search", "list_files", "git"],
       "read_only": false
+    }
+  },
+  "commands": {
+    "test": {
+      "description": "Run project tests",
+      "script": "mvn test",
+      "timeout": 300
+    },
+    "build": {
+      "description": "Build the project",
+      "script": "mvn clean package -DskipTests",
+      "timeout": 120
+    }
+  },
+  "skills": {
+    "code-review": {
+      "description": "Automated code review with best practices checking",
+      "type": "prompt",
+      "system_prompt": "When reviewing code, check for: security vulnerabilities, performance issues, error handling, naming conventions, and test coverage."
     }
   }
 }
