@@ -206,7 +206,16 @@ public class LMStudioProvider implements LLMProvider {
                 }
             }
 
-            return new LLMResponse(content, toolCalls, !toolCalls.isEmpty(), 0, 0);
+            // Parse token usage
+            int promptTokens = 0;
+            int completionTokens = 0;
+            if (root.has("usage")) {
+                JsonNode usage = root.get("usage");
+                if (usage.has("prompt_tokens")) promptTokens = usage.get("prompt_tokens").asInt();
+                if (usage.has("completion_tokens")) completionTokens = usage.get("completion_tokens").asInt();
+            }
+
+            return new LLMResponse(content, toolCalls, !toolCalls.isEmpty(), promptTokens, completionTokens);
         } catch (Exception e) {
             return new LLMResponse("Error parsing response: " + e.getMessage(), List.of(), false, 0, 0);
         }

@@ -1,6 +1,7 @@
 package com.opencodejava.tool;
 
 import com.opencodejava.provider.LLMProvider.ToolDefinition;
+import com.opencodejava.ui.DiffRenderer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -40,13 +41,22 @@ public class FileWriteTool implements Tool {
             }
 
             boolean existed = Files.exists(path);
+            String oldContent = existed ? Files.readString(path) : "";
             Files.writeString(path, content);
 
             long size = Files.size(path);
             long lines = content.lines().count();
 
             String action = existed ? "Updated" : "Created";
-            return ToolResult.success(String.format("%s file: %s (%d bytes, %d lines)", action, path, size, lines));
+            String result = String.format("%s file: %s (%d bytes, %d lines)", action, path, size, lines);
+
+            // Show diff if file was updated
+            if (existed && !oldContent.equals(content)) {
+                String diff = DiffRenderer.getInstance().renderDiff(oldContent, content, path.toString());
+                System.out.println(diff);
+            }
+
+            return ToolResult.success(result);
         } catch (IOException e) {
             return ToolResult.failure("Failed to write file: " + e.getMessage());
         }

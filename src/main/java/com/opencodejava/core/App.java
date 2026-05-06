@@ -2,6 +2,7 @@ package com.opencodejava.core;
 
 import com.opencodejava.agent.AgentManager;
 import com.opencodejava.command.CommandRegistry;
+import com.opencodejava.core.Memory;
 import com.opencodejava.provider.ProviderFactory;
 import com.opencodejava.provider.LLMProvider;
 import com.opencodejava.skill.SkillRegistry;
@@ -34,6 +35,9 @@ public class App {
     }
 
     public void run() {
+        // Load memory system on startup
+        Memory.getInstance().load();
+
         sessionManager.newConversation(null);
         ui.start();
     }

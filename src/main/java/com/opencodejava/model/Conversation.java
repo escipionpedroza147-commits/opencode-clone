@@ -38,6 +38,12 @@ public class Conversation {
 
     public int getMessageCount() { return messages.size(); }
 
+    public void removeLastMessage() {
+        if (!messages.isEmpty()) {
+            messages.remove(messages.size() - 1);
+        }
+    }
+
     public List<Message> getLastMessages(int count) {
         int start = Math.max(0, messages.size() - count);
         return messages.subList(start, messages.size());

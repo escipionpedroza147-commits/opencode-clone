@@ -11,6 +11,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Config {
     private static Config instance;
@@ -61,7 +63,8 @@ public class Config {
                 "build",
                 "Full-access coding agent with all tools",
                 loadPrompt("build-agent.txt"),
-                List.of("file_read", "file_write", "file_edit", "bash", "search", "list_files", "git"),
+                List.of("file_read", "file_write", "file_edit", "bash", "search", "list_files", "git",
+                        "web_search", "web_fetch", "image_gen"),
                 false
         ));
 
@@ -69,7 +72,7 @@ public class Config {
                 "plan",
                 "Read-only analysis and planning agent",
                 loadPrompt("plan-agent.txt"),
-                List.of("file_read", "search", "list_files"),
+                List.of("file_read", "search", "list_files", "web_search", "web_fetch"),
                 true
         ));
 
@@ -77,7 +80,7 @@ public class Config {
                 "general",
                 "General-purpose subagent for complex searches and multistep tasks",
                 loadPrompt("general-agent.txt"),
-                List.of("file_read", "bash", "search", "list_files", "git"),
+                List.of("file_read", "bash", "search", "list_files", "git", "web_search", "web_fetch"),
                 false
         ));
 
@@ -120,10 +123,31 @@ public class Config {
         };
     }
 
+    /**
+     * Interpolate environment variables in a string.
+     * Supports ${VAR_NAME} syntax.
+     */
+    public static String interpolateEnvVars(String value) {
+        if (value == null || !value.contains("${")) return value;
+        Pattern pattern = Pattern.compile("\\$\\{([^}]+)}");
+        Matcher matcher = pattern.matcher(value);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            String envName = matcher.group(1);
+            String envValue = System.getenv(envName);
+            matcher.appendReplacement(result, envValue != null ? Matcher.quoteReplacement(envValue) : "");
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
     public void loadFromFile(Path configPath) throws IOException {
         if (!Files.exists(configPath)) return;
 
-        JsonNode root = mapper.readTree(configPath.toFile());
+        // Read and interpolate environment variables
+        String rawJson = Files.readString(configPath);
+        String interpolated = interpolateEnvVars(rawJson);
+        JsonNode root = mapper.readTree(interpolated);
 
         if (root.has("provider")) {
             JsonNode prov = root.get("provider");
@@ -233,6 +257,27 @@ public class Config {
 
     public AgentConfig getAgentConfig(String name) {
         return agents.get(name);
+    }
+
+    /**
+     * Get a formatted display of current configuration.
+     */
+    public String getConfigDisplay() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("⚙️  Current Configuration:\n\n");
+        sb.append("Provider: ").append(activeProvider).append("\n");
+        sb.append("Model: ").append(activeModel).append("\n");
+        sb.append("Base URL: ").append(providerConfig.getBaseUrl()).append("\n");
+        sb.append("API Key: ").append(providerConfig.getApiKey() != null ? "****" + providerConfig.getApiKey().substring(Math.max(0, providerConfig.getApiKey().length() - 4)) : "(not set)").append("\n");
+        sb.append("Temperature: ").append(providerConfig.getTemperature()).append("\n");
+        sb.append("Max Tokens: ").append(providerConfig.getMaxTokens()).append("\n");
+        sb.append("Working Dir: ").append(workingDirectory).append("\n");
+        sb.append("Data Dir: ").append(dataDirectory).append("\n");
+        sb.append("\nAgents: ").append(String.join(", ", agents.keySet())).append("\n");
+        if (!userCommands.isEmpty()) {
+            sb.append("User Commands: ").append(String.join(", ", userCommands.keySet())).append("\n");
+        }
+        return sb.toString();
     }
 
     public void ensureDataDirectory() {

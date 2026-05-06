@@ -1,6 +1,7 @@
 package com.opencodejava.tool;
 
 import com.opencodejava.provider.LLMProvider.ToolDefinition;
+import com.opencodejava.ui.DiffRenderer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -84,6 +85,10 @@ public class FileEditTool implements Tool {
             String summary = String.format("Edited %s: replaced %d lines with %d lines (%s%d lines)",
                     path.getFileName(), oldLines, newLines,
                     lineDiff >= 0 ? "+" : "", lineDiff);
+
+            // Show colored diff
+            String diff = DiffRenderer.getInstance().renderDiff(content, newContent, path.toString());
+            System.out.println(diff);
 
             return ToolResult.success(summary);
         } catch (IOException e) {

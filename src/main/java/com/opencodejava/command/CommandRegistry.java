@@ -22,6 +22,14 @@ public class CommandRegistry {
         register(new QuitCommand());
         register(new ModelCommand(app));
         register(new AgentsCommand(app));
+        register(new RememberCommand());
+        register(new MemoryCommand());
+        register(new UsageCommand());
+        register(new ConfigCommand(app));
+        register(new SessionCommand(app));
+        register(new ExportCommand(app));
+        register(new UndoCommand(app));
+        register(new SearchCommand(app));
     }
 
     /**

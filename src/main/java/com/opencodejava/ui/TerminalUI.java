@@ -1,6 +1,7 @@
 package com.opencodejava.ui;
 
 import com.opencodejava.core.App;
+import com.opencodejava.core.UsageTracker;
 import com.opencodejava.command.CommandRegistry;
 import com.opencodejava.agent.AgentManager;
 import com.vladsch.flexmark.html.HtmlRenderer;
@@ -9,13 +10,17 @@ import com.vladsch.flexmark.util.ast.Node;
 
 import org.jline.reader.*;
 import org.jline.reader.impl.DefaultParser;
+import org.jline.reader.impl.completer.AggregateCompleter;
+import org.jline.reader.impl.completer.StringsCompleter;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStringBuilder;
 import org.jline.utils.AttributedStyle;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -50,6 +55,7 @@ public class TerminalUI {
             lineReader = LineReaderBuilder.builder()
                     .terminal(terminal)
                     .parser(new DefaultParser())
+                    .completer(buildCompleter())
                     .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
                     .build();
 
@@ -156,20 +162,30 @@ public class TerminalUI {
         String agent = agentManager.getActiveAgentName();
         String model = app.getProvider().getModelName();
         String shortModel = model.contains("/") ? model.substring(model.lastIndexOf('/') + 1) : model;
+        String tokenStatus = UsageTracker.getInstance().getPromptStatus();
 
-        return new AttributedStringBuilder()
+        AttributedStringBuilder builder = new AttributedStringBuilder()
                 .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN))
                 .append("[")
                 .append(agent)
                 .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT))
                 .append(":")
                 .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW))
-                .append(shortModel)
-                .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN))
+                .append(shortModel);
+
+        if (!tokenStatus.isEmpty()) {
+            builder.style(AttributedStyle.DEFAULT.foreground(AttributedStyle.BRIGHT))
+                    .append(":")
+                    .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN))
+                    .append(tokenStatus);
+        }
+
+        builder.style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN))
                 .append("]")
                 .style(AttributedStyle.DEFAULT)
-                .append(" > ")
-                .toAnsi();
+                .append(" > ");
+
+        return builder.toAnsi();
     }
 
     private void printWelcome() {
@@ -230,5 +246,67 @@ public class TerminalUI {
 
     public boolean isRunning() {
         return running.get();
+    }
+
+    /**
+     * Build a completer for tab completion supporting:
+     * - Commands (starting with /)
+     * - @agent names (starting with @)
+     * - File paths from working directory
+     */
+    private Completer buildCompleter() {
+        // Command completer
+        List<String> commands = new ArrayList<>();
+        commands.add("/help");
+        commands.add("/clear");
+        commands.add("/compact");
+        commands.add("/quit");
+        commands.add("/model");
+        commands.add("/agents");
+        commands.add("/remember");
+        commands.add("/memory");
+        commands.add("/usage");
+
+        // Agent mention completer
+        List<String> agentMentions = new ArrayList<>();
+        for (String name : agentManager.getAgentNames()) {
+            agentMentions.add("@" + name);
+        }
+
+        // File path completer
+        Completer fileCompleter = (reader, line, candidates) -> {
+            String word = line.word();
+            if (word == null) word = "";
+
+            File dir;
+            String prefix;
+            if (word.contains("/") || word.contains(File.separator)) {
+                int lastSep = Math.max(word.lastIndexOf('/'), word.lastIndexOf(File.separatorChar));
+                String dirPath = word.substring(0, lastSep + 1);
+                prefix = word.substring(lastSep + 1);
+                dir = new File(app.getConfig().getWorkingDirectory(), dirPath);
+            } else {
+                dir = new File(app.getConfig().getWorkingDirectory());
+                prefix = word;
+            }
+
+            if (dir.isDirectory()) {
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        if (f.getName().startsWith(prefix) && !f.getName().startsWith(".")) {
+                            String value = f.isDirectory() ? f.getName() + "/" : f.getName();
+                            candidates.add(new Candidate(value));
+                        }
+                    }
+                }
+            }
+        };
+
+        return new AggregateCompleter(
+                new StringsCompleter(commands),
+                new StringsCompleter(agentMentions),
+                fileCompleter
+        );
     }
 }

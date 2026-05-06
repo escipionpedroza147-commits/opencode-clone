@@ -21,6 +21,9 @@ public class ToolRegistry {
         register(new SearchTool(config.getWorkingDirectory()));
         register(new ListFilesTool(config.getWorkingDirectory()));
         register(new GitTool(config.getWorkingDirectory()));
+        register(new WebSearchTool());
+        register(new WebFetchTool());
+        register(new ImageGenTool());
     }
 
     public void register(Tool tool) {

@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Manages all agents including built-in and user-defined.
@@ -185,6 +186,35 @@ public class AgentManager {
 
     public void clearActiveAgentHistory() {
         getActiveAgent().clearHistory();
+    }
+
+    /**
+     * Execute multiple agent tasks in parallel.
+     * Each entry maps an agent name to its task.
+     */
+    public Map<String, String> parallelDelegate(Map<String, String> agentTasks, Consumer<String> onProgress) {
+        Map<AgentConfig, String> tasks = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : agentTasks.entrySet()) {
+            AgentConfig agentConfig = config.getAgentConfig(entry.getKey());
+            if (agentConfig != null) {
+                String enhancedPrompt = enhancePromptWithSkills(agentConfig.getSystemPrompt());
+                AgentConfig enhanced = new AgentConfig(
+                        agentConfig.getName(),
+                        agentConfig.getDescription(),
+                        enhancedPrompt,
+                        agentConfig.getTools(),
+                        agentConfig.isReadOnly()
+                );
+                tasks.put(enhanced, entry.getValue());
+            }
+        }
+
+        ParallelExecutor executor = new ParallelExecutor(provider, toolRegistry);
+        try {
+            return executor.executeParallel(tasks, onProgress);
+        } finally {
+            executor.shutdown();
+        }
     }
 
     public SkillRegistry getSkillRegistry() {

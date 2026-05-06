@@ -31,6 +31,7 @@ public class ListFilesTool implements Tool {
     public String getDescription() {
         return "List files and directories in a tree structure. " +
                 "Useful for understanding project layout before reading or editing files. " +
+                "Supports glob patterns (e.g. *.java, src/**/*.xml). " +
                 "Automatically skips common non-essential directories (node_modules, .git, target, etc.)";
     }
 
@@ -40,6 +41,8 @@ public class ListFilesTool implements Tool {
                 (String) arguments.get("path") : workingDirectory;
         int maxDepth = arguments.containsKey("depth") ?
                 parseIntArg(arguments.get("depth")) : MAX_DEPTH_DEFAULT;
+        String glob = arguments.containsKey("glob") ?
+                (String) arguments.get("glob") : null;
 
         Path startPath = Path.of(dirPath).toAbsolutePath();
         if (!Files.exists(startPath)) {
@@ -47,6 +50,11 @@ public class ListFilesTool implements Tool {
         }
         if (!Files.isDirectory(startPath)) {
             return ToolResult.failure("Not a directory: " + startPath);
+        }
+
+        // If glob pattern is provided, use glob matching
+        if (glob != null && !glob.isEmpty()) {
+            return executeGlob(startPath, glob, maxDepth);
         }
 
         StringBuilder tree = new StringBuilder();
@@ -66,6 +74,52 @@ public class ListFilesTool implements Tool {
 
         tree.append("\n\nTotal: ").append(fileCount.get(0)).append(" files/directories");
         return ToolResult.success(tree.toString());
+    }
+
+    private ToolResult executeGlob(Path startPath, String glob, int maxDepth) {
+        String pattern = "glob:" + glob;
+        java.nio.file.PathMatcher matcher = startPath.getFileSystem().getPathMatcher(pattern);
+        List<String> matches = new ArrayList<>();
+
+        try {
+            Files.walkFileTree(startPath, java.util.EnumSet.noneOf(java.nio.file.FileVisitOption.class),
+                    maxDepth, new java.nio.file.SimpleFileVisitor<Path>() {
+                        @Override
+                        public java.nio.file.FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                            String dirName = dir.getFileName().toString();
+                            if (IGNORED_DIRS.contains(dirName) && !dir.equals(startPath)) {
+                                return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            if (matches.size() >= MAX_FILES) {
+                                return java.nio.file.FileVisitResult.TERMINATE;
+                            }
+                            Path relativePath = startPath.relativize(file);
+                            if (matcher.matches(relativePath) || matcher.matches(file.getFileName())) {
+                                matches.add(relativePath.toString());
+                            }
+                            return java.nio.file.FileVisitResult.CONTINUE;
+                        }
+                    });
+        } catch (IOException e) {
+            return ToolResult.failure("Failed to search files: " + e.getMessage());
+        }
+
+        if (matches.isEmpty()) {
+            return ToolResult.success("No files matching pattern: " + glob);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Files matching '").append(glob).append("':\n\n");
+        for (String match : matches) {
+            sb.append("  ").append(match).append("\n");
+        }
+        sb.append("\nTotal: ").append(matches.size()).append(" file(s)");
+        return ToolResult.success(sb.toString());
     }
 
     private void buildTree(Path dir, StringBuilder tree, String prefix,
@@ -129,6 +183,8 @@ public class ListFilesTool implements Tool {
                 "description", "Directory path to list (default: project root)"));
         params.put("depth", Map.of("type", "integer",
                 "description", "Maximum depth to traverse (default: 4)"));
+        params.put("glob", Map.of("type", "string",
+                "description", "Optional glob pattern to filter files (e.g. *.java, **/*.xml)"));
         return new ToolDefinition(getName(), getDescription(), params);
     }
 

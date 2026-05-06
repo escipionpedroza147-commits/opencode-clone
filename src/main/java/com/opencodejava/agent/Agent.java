@@ -1,5 +1,7 @@
 package com.opencodejava.agent;
 
+import com.opencodejava.core.Memory;
+import com.opencodejava.core.UsageTracker;
 import com.opencodejava.model.AgentConfig;
 import com.opencodejava.model.Message;
 import com.opencodejava.model.ToolCall;
@@ -24,10 +26,13 @@ public class Agent {
     private final ToolRegistry toolRegistry;
     private final List<Message> conversationHistory;
     private final List<Agent> subagents;
+    private final List<String> memories;
     private final int depth;
+    private int consecutiveErrorCount;
     private static final int MAX_DEPTH = 5;
     private static final int MAX_TOOL_ITERATIONS = 50; // Higher limit for complex tasks
     private static final int MAX_RETRIES = 3;
+    private static final int HANDOFF_ERROR_THRESHOLD = 3;
 
     public Agent(AgentConfig config, LLMProvider provider, ToolRegistry toolRegistry) {
         this(config, provider, toolRegistry, 0);
@@ -39,7 +44,9 @@ public class Agent {
         this.toolRegistry = toolRegistry;
         this.conversationHistory = new ArrayList<>();
         this.subagents = new ArrayList<>();
+        this.memories = new ArrayList<>();
         this.depth = depth;
+        this.consecutiveErrorCount = 0;
     }
 
     /**
@@ -101,6 +108,12 @@ public class Agent {
 
             consecutiveErrors = 0; // Reset on successful response
 
+            // Track usage
+            if (response.promptTokens() > 0 || response.completionTokens() > 0) {
+                UsageTracker.getInstance().addUsage(
+                        provider.getModelName(), response.promptTokens(), response.completionTokens());
+            }
+
             if (response.hasToolCalls()) {
                 // Add assistant message WITH tool_calls attached (required by API)
                 String assistantContent = response.content() != null ? response.content() : "";
@@ -148,9 +161,22 @@ public class Agent {
 
                 // If tools failed, inject a hint to help the agent recover
                 if (anyFailed) {
+                    consecutiveErrorCount++;
                     conversationHistory.add(new Message(Message.Role.SYSTEM,
                             "System: One or more tool calls failed. Review the errors above and try a different approach. " +
                                     "Read relevant files first if you're unsure about paths or content."));
+
+                    // Agent-to-Agent handoff: if too many consecutive errors, ask plan agent
+                    if (consecutiveErrorCount >= HANDOFF_ERROR_THRESHOLD && !config.isReadOnly() && depth < MAX_DEPTH) {
+                        String handoffResult = requestPlanAgentHelp(userMessage, onToken);
+                        if (handoffResult != null) {
+                            conversationHistory.add(new Message(Message.Role.SYSTEM,
+                                    "Plan agent advice: " + handoffResult));
+                            consecutiveErrorCount = 0;
+                        }
+                    }
+                } else {
+                    consecutiveErrorCount = 0;
                 }
 
                 // Continue loop — the LLM will process tool results and decide next action
@@ -160,6 +186,18 @@ public class Agent {
                 if (content == null || content.isEmpty()) {
                     content = "(Agent produced no response)";
                 }
+
+                // Check if agent is unsure and should hand off to plan agent
+                if (shouldHandoff(content) && !config.isReadOnly() && depth < MAX_DEPTH) {
+                    String advice = requestPlanAgentHelp(userMessage, onToken);
+                    if (advice != null) {
+                        conversationHistory.add(new Message(Message.Role.SYSTEM,
+                                "Plan agent advice: " + advice + "\nPlease try again with this guidance."));
+                        consecutiveErrorCount = 0;
+                        continue; // Re-loop with plan agent's advice
+                    }
+                }
+
                 conversationHistory.add(new Message(Message.Role.ASSISTANT, content));
 
                 // Stream remaining content if not already streamed
@@ -216,6 +254,20 @@ public class Agent {
 
         if (depth > 0) {
             prompt.append("\nYou are a subagent. Complete your assigned task fully and return your findings/results.");
+        }
+
+        // Add persistent memory context
+        String memoryContext = Memory.getInstance().getMemoryContext(10);
+        if (!memoryContext.isEmpty()) {
+            prompt.append(memoryContext);
+        }
+
+        // Add agent session memories
+        if (!memories.isEmpty()) {
+            prompt.append("\n## Session Notes\n");
+            for (String mem : memories) {
+                prompt.append("- ").append(mem).append("\n");
+            }
         }
 
         return prompt.toString();
@@ -287,5 +339,63 @@ public class Agent {
     public void clearHistory() {
         conversationHistory.clear();
         subagents.clear();
+        memories.clear();
+    }
+
+    /**
+     * Add a memory to this agent's session memory.
+     */
+    public void addMemory(String memory) {
+        memories.add(memory);
+    }
+
+    /**
+     * Get this agent's session memories.
+     */
+    public List<String> getMemories() {
+        return memories;
+    }
+
+    /**
+     * Check if the response indicates the agent is unsure and should hand off.
+     */
+    private boolean shouldHandoff(String content) {
+        if (content == null) return false;
+        String lower = content.toLowerCase();
+        return lower.contains("i'm not sure") ||
+                lower.contains("i am not sure") ||
+                lower.contains("i don't know how to") ||
+                lower.contains("i cannot determine") ||
+                lower.contains("i'm unable to figure out");
+    }
+
+    /**
+     * Request help from the plan agent when the build agent is stuck.
+     */
+    private String requestPlanAgentHelp(String originalTask, Consumer<String> onToken) {
+        try {
+            if (onToken != null) {
+                onToken.accept("\n🔄 Consulting plan agent for guidance...\n");
+            }
+
+            AgentConfig planConfig = new AgentConfig(
+                    "plan-helper",
+                    "Analysis helper",
+                    "You are an analysis agent. The build agent is stuck on a task. " +
+                            "Analyze the problem and provide concrete, actionable advice on how to proceed. " +
+                            "Be specific about file paths, function names, and approaches to try.",
+                    List.of("file_read", "search", "list_files"),
+                    true
+            );
+
+            Agent planAgent = new Agent(planConfig, provider, toolRegistry, depth + 1);
+            String task = "The build agent is stuck on this task: " + originalTask +
+                    "\n\nRecent errors suggest the current approach isn't working. " +
+                    "Please analyze and suggest a better approach.";
+
+            return planAgent.processMessage(task, null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

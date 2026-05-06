@@ -24,6 +24,9 @@ public class OpenRouterProvider implements LLMProvider {
     private final ProviderConfig config;
     private String model;
 
+    private static final int MAX_RETRIES = 3;
+    private static final long INITIAL_BACKOFF_MS = 1000;
+
     public OpenRouterProvider(ProviderConfig config) {
         this.config = config;
         this.model = config.getModel();
@@ -37,30 +40,64 @@ public class OpenRouterProvider implements LLMProvider {
 
     @Override
     public LLMResponse chat(List<Message> messages, List<ToolDefinition> tools, String systemPrompt) {
-        try {
-            String requestBody = buildRequestBody(messages, tools, systemPrompt, false);
-            Request request = new Request.Builder()
-                    .url(config.getBaseUrl() + "/chat/completions")
-                    .addHeader("Authorization", "Bearer " + config.getApiKey())
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("HTTP-Referer", "https://github.com/opencode-java")
-                    .addHeader("X-Title", "OpenCode Java")
-                    .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
-                    .build();
+        String requestBody = buildRequestBody(messages, tools, systemPrompt, false);
 
-            try (Response response = client.newCall(request).execute()) {
-                if (!response.isSuccessful()) {
-                    String errorBody = response.body() != null ? response.body().string() : "Unknown error";
-                    return new LLMResponse("API error (" + response.code() + "): " + errorBody,
-                            List.of(), false, 0, 0);
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                Request request = new Request.Builder()
+                        .url(config.getBaseUrl() + "/chat/completions")
+                        .addHeader("Authorization", "Bearer " + config.getApiKey())
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("HTTP-Referer", "https://github.com/opencode-java")
+                        .addHeader("X-Title", "OpenCode Java")
+                        .post(RequestBody.create(requestBody, MediaType.parse("application/json")))
+                        .build();
+
+                try (Response response = client.newCall(request).execute()) {
+                    int code = response.code();
+
+                    if (code == 429) {
+                        // Rate limited - exponential backoff
+                        long backoff = calculateBackoff(attempt, response);
+                        if (attempt < MAX_RETRIES) {
+                            Thread.sleep(backoff);
+                            continue;
+                        }
+                        return new LLMResponse("Rate limited (429). Retry after backoff failed.", List.of(), false, 0, 0);
+                    }
+
+                    if (code >= 500 && attempt < MAX_RETRIES) {
+                        // Server error - retry with backoff
+                        Thread.sleep(calculateBackoff(attempt, null));
+                        continue;
+                    }
+
+                    if (!response.isSuccessful()) {
+                        String errorBody = response.body() != null ? response.body().string() : "Unknown error";
+                        return new LLMResponse("API error (" + code + "): " + errorBody, List.of(), false, 0, 0);
+                    }
+
+                    String responseBody = response.body().string();
+                    return parseResponse(responseBody);
                 }
-
-                String responseBody = response.body().string();
-                return parseResponse(responseBody);
+            } catch (IOException e) {
+                if (attempt < MAX_RETRIES) {
+                    try {
+                        Thread.sleep(calculateBackoff(attempt, null));
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return new LLMResponse("Interrupted during retry", List.of(), false, 0, 0);
+                    }
+                    continue;
+                }
+                return new LLMResponse("Connection error after " + (MAX_RETRIES + 1) + " attempts: " + e.getMessage(),
+                        List.of(), false, 0, 0);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new LLMResponse("Interrupted during retry", List.of(), false, 0, 0);
             }
-        } catch (IOException e) {
-            return new LLMResponse("Connection error: " + e.getMessage(), List.of(), false, 0, 0);
         }
+        return new LLMResponse("Max retries exceeded", List.of(), false, 0, 0);
     }
 
     @Override
@@ -80,6 +117,7 @@ public class OpenRouterProvider implements LLMProvider {
             CountDownLatch latch = new CountDownLatch(1);
             StringBuilder fullContent = new StringBuilder();
             Map<Integer, Map<String, String>> toolCallAccumulator = new TreeMap<>();
+            int[] usageTokens = {0, 0};
 
             EventSource.Factory factory = EventSources.createFactory(client);
             factory.newEventSource(request, new EventSourceListener() {
@@ -88,17 +126,21 @@ public class OpenRouterProvider implements LLMProvider {
                     if ("[DONE]".equals(data)) {
                         List<ToolCall> finalToolCalls = buildToolCalls(toolCallAccumulator);
                         onComplete.accept(new LLMResponse(
-                                fullContent.toString(),
-                                finalToolCalls,
-                                !finalToolCalls.isEmpty(),
-                                0, 0
-                        ));
+                                fullContent.toString(), finalToolCalls, !finalToolCalls.isEmpty(),
+                                usageTokens[0], usageTokens[1]));
                         latch.countDown();
                         return;
                     }
 
                     try {
                         JsonNode chunk = mapper.readTree(data);
+
+                        if (chunk.has("usage")) {
+                            JsonNode usage = chunk.get("usage");
+                            if (usage.has("prompt_tokens")) usageTokens[0] = usage.get("prompt_tokens").asInt();
+                            if (usage.has("completion_tokens")) usageTokens[1] = usage.get("completion_tokens").asInt();
+                        }
+
                         JsonNode choices = chunk.get("choices");
                         if (choices != null && choices.size() > 0) {
                             JsonNode delta = choices.get(0).get("delta");
@@ -131,27 +173,27 @@ public class OpenRouterProvider implements LLMProvider {
                                 }
                             }
 
-                            // Check for finish_reason
                             JsonNode finishReason = choices.get(0).get("finish_reason");
                             if (finishReason != null && !finishReason.isNull()) {
                                 String reason = finishReason.asText();
                                 if ("stop".equals(reason) || "end_turn".equals(reason)) {
                                     if (toolCallAccumulator.isEmpty()) {
-                                        // Text-only response complete
                                         onComplete.accept(new LLMResponse(
-                                                fullContent.toString(), List.of(), false, 0, 0));
+                                                fullContent.toString(), List.of(), false,
+                                                usageTokens[0], usageTokens[1]));
                                         latch.countDown();
                                     }
                                 } else if ("tool_calls".equals(reason) || "tool_use".equals(reason)) {
                                     List<ToolCall> finalToolCalls = buildToolCalls(toolCallAccumulator);
                                     onComplete.accept(new LLMResponse(
-                                            fullContent.toString(), finalToolCalls, true, 0, 0));
+                                            fullContent.toString(), finalToolCalls, true,
+                                            usageTokens[0], usageTokens[1]));
                                     latch.countDown();
                                 }
                             }
                         }
                     } catch (Exception e) {
-                        // Skip malformed chunks
+                        // Skip malformed chunks gracefully
                     }
                 }
 
@@ -173,11 +215,11 @@ public class OpenRouterProvider implements LLMProvider {
 
                 @Override
                 public void onClosed(EventSource eventSource) {
-                    // If latch hasn't been counted down yet, do it now
                     if (latch.getCount() > 0) {
                         List<ToolCall> finalToolCalls = buildToolCalls(toolCallAccumulator);
                         onComplete.accept(new LLMResponse(
-                                fullContent.toString(), finalToolCalls, !finalToolCalls.isEmpty(), 0, 0));
+                                fullContent.toString(), finalToolCalls, !finalToolCalls.isEmpty(),
+                                usageTokens[0], usageTokens[1]));
                         latch.countDown();
                     }
                 }
@@ -189,18 +231,38 @@ public class OpenRouterProvider implements LLMProvider {
         }
     }
 
+    /**
+     * Calculate exponential backoff with jitter.
+     */
+    private long calculateBackoff(int attempt, Response response) {
+        // Check for Retry-After header
+        if (response != null) {
+            String retryAfter = response.header("Retry-After");
+            if (retryAfter != null) {
+                try {
+                    return Long.parseLong(retryAfter) * 1000;
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        // Exponential backoff: 1s, 2s, 4s + jitter
+        long backoff = INITIAL_BACKOFF_MS * (1L << attempt);
+        long jitter = (long) (Math.random() * backoff * 0.1);
+        return backoff + jitter;
+    }
+
     private List<ToolCall> buildToolCalls(Map<Integer, Map<String, String>> accumulator) {
         List<ToolCall> calls = new ArrayList<>();
         for (Map<String, String> acc : accumulator.values()) {
             String id = acc.getOrDefault("id", UUID.randomUUID().toString());
             String name = acc.get("name");
-            if (name == null || name.isEmpty()) continue; // Skip incomplete tool calls
+            if (name == null || name.isEmpty()) continue;
             String argsJson = acc.getOrDefault("arguments", "{}");
             try {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> args = mapper.readValue(argsJson, Map.class);
                 calls.add(new ToolCall(id, name, args));
             } catch (Exception e) {
+                // Graceful handling of malformed JSON - wrap raw as argument
                 calls.add(new ToolCall(id, name, Map.of("raw", argsJson)));
             }
         }
@@ -217,14 +279,12 @@ public class OpenRouterProvider implements LLMProvider {
 
         ArrayNode messagesArray = root.putArray("messages");
 
-        // Add system prompt
         if (systemPrompt != null && !systemPrompt.isEmpty()) {
             ObjectNode sysMsg = messagesArray.addObject();
             sysMsg.put("role", "system");
             sysMsg.put("content", systemPrompt);
         }
 
-        // Add conversation messages
         for (Message msg : messages) {
             ObjectNode msgNode = messagesArray.addObject();
             switch (msg.getRole()) {
@@ -239,7 +299,6 @@ public class OpenRouterProvider implements LLMProvider {
                     } else {
                         msgNode.putNull("content");
                     }
-                    // Include tool_calls if present (required for tool result messages to work)
                     if (msg.hasToolCalls()) {
                         ArrayNode tcArray = msgNode.putArray("tool_calls");
                         for (var tc : msg.getToolCalls()) {
@@ -270,7 +329,6 @@ public class OpenRouterProvider implements LLMProvider {
             }
         }
 
-        // Add tools with proper OpenAI-compatible format
         if (tools != null && !tools.isEmpty()) {
             ArrayNode toolsArray = root.putArray("tools");
             for (ToolDefinition tool : tools) {
@@ -301,8 +359,6 @@ public class OpenRouterProvider implements LLMProvider {
                             prop.put("type", "string");
                             prop.put("description", entry.getValue().toString());
                         }
-
-                        // Mark all params as required for clarity
                         required.add(paramName);
                     }
                 }
@@ -315,6 +371,14 @@ public class OpenRouterProvider implements LLMProvider {
     private LLMResponse parseResponse(String responseBody) {
         try {
             JsonNode root = mapper.readTree(responseBody);
+
+            // Check for error response format
+            if (root.has("error")) {
+                JsonNode error = root.get("error");
+                String msg = error.has("message") ? error.get("message").asText() : "Unknown API error";
+                return new LLMResponse("API Error: " + msg, List.of(), false, 0, 0);
+            }
+
             JsonNode choices = root.get("choices");
             if (choices == null || choices.isEmpty()) {
                 return new LLMResponse("No response from model", List.of(), false, 0, 0);
@@ -330,13 +394,25 @@ public class OpenRouterProvider implements LLMProvider {
                     String id = tc.has("id") ? tc.get("id").asText() : UUID.randomUUID().toString();
                     String name = tc.get("function").get("name").asText();
                     String argsJson = tc.get("function").get("arguments").asText();
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> args = mapper.readValue(argsJson, Map.class);
-                    toolCalls.add(new ToolCall(id, name, args));
+                    try {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> args = mapper.readValue(argsJson, Map.class);
+                        toolCalls.add(new ToolCall(id, name, args));
+                    } catch (Exception e) {
+                        toolCalls.add(new ToolCall(id, name, Map.of("raw", argsJson)));
+                    }
                 }
             }
 
-            return new LLMResponse(content, toolCalls, !toolCalls.isEmpty(), 0, 0);
+            int promptTokens = 0;
+            int completionTokens = 0;
+            if (root.has("usage")) {
+                JsonNode usage = root.get("usage");
+                if (usage.has("prompt_tokens")) promptTokens = usage.get("prompt_tokens").asInt();
+                if (usage.has("completion_tokens")) completionTokens = usage.get("completion_tokens").asInt();
+            }
+
+            return new LLMResponse(content, toolCalls, !toolCalls.isEmpty(), promptTokens, completionTokens);
         } catch (Exception e) {
             return new LLMResponse("Error parsing response: " + e.getMessage(), List.of(), false, 0, 0);
         }
