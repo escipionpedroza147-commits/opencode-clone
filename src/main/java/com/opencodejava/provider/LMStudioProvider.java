@@ -25,6 +25,8 @@ public class LMStudioProvider implements LLMProvider {
     private static final Logger logger = Logger.getLogger(LMStudioProvider.class.getName());
     private static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
             "<tool_call>\\s*(\\{.*?})\\s*</tool_call>", Pattern.DOTALL);
+    private static final Pattern BARE_TOOL_CALL_PATTERN = Pattern.compile(
+            "\\{\\s*\"name\"\\s*:\\s*\"(\\w+)\"\\s*,\\s*\"arguments\"\\s*:\\s*(\\{[^}]*\\})\\s*\\}");
 
     private final OkHttpClient client;
     private final ObjectMapper mapper;
@@ -93,8 +95,9 @@ public class LMStudioProvider implements LLMProvider {
                         String text = fullContent.toString();
                         List<ToolCall> toolCalls = extractToolCalls(text);
                         if (!toolCalls.isEmpty()) {
-                            // Strip tool_call blocks from the displayed content
-                            String cleanContent = TOOL_CALL_PATTERN.matcher(text).replaceAll("").trim();
+                            // Strip tool_call blocks and bare JSON tool calls from displayed content
+                            String cleanContent = TOOL_CALL_PATTERN.matcher(text).replaceAll("");
+                            cleanContent = BARE_TOOL_CALL_PATTERN.matcher(cleanContent).replaceAll("").trim();
                             onComplete.accept(new LLMResponse(cleanContent, toolCalls, true, 0, 0));
                         } else {
                             onComplete.accept(new LLMResponse(text, List.of(), false, 0, 0));
@@ -263,8 +266,9 @@ public class LMStudioProvider implements LLMProvider {
             // Check for prompt-based tool calls in the text
             List<ToolCall> toolCalls = extractToolCalls(content);
             if (!toolCalls.isEmpty()) {
-                // Strip tool_call blocks from the content
-                String cleanContent = TOOL_CALL_PATTERN.matcher(content).replaceAll("").trim();
+                // Strip tool_call blocks and bare JSON tool calls from the content
+                String cleanContent = TOOL_CALL_PATTERN.matcher(content).replaceAll("");
+                cleanContent = BARE_TOOL_CALL_PATTERN.matcher(cleanContent).replaceAll("").trim();
                 return new LLMResponse(cleanContent, toolCalls, true, promptTokens, completionTokens);
             }
 
@@ -275,7 +279,8 @@ public class LMStudioProvider implements LLMProvider {
     }
 
     /**
-     * Extracts tool calls from the model's text output by finding <tool_call>...</tool_call> blocks.
+     * Extracts tool calls from the model's text output by finding <tool_call>...</tool_call> blocks
+     * or bare JSON objects with {"name": "...", "arguments": {...}} format.
      * Handles multiple tool calls and gracefully skips malformed JSON.
      */
     private List<ToolCall> extractToolCalls(String text) {
@@ -284,47 +289,81 @@ public class LMStudioProvider implements LLMProvider {
             return toolCalls;
         }
 
+        // First try: look for <tool_call> tags
         Matcher matcher = TOOL_CALL_PATTERN.matcher(text);
         while (matcher.find()) {
             String jsonStr = matcher.group(1).trim();
-            try {
-                JsonNode node = mapper.readTree(jsonStr);
-                String name = node.has("name") ? node.get("name").asText() : null;
-                if (name == null || name.isEmpty()) {
-                    logger.warning("Skipping tool_call block with missing 'name': " + jsonStr);
-                    continue;
-                }
+            ToolCall tc = parseToolCallJson(jsonStr);
+            if (tc != null) toolCalls.add(tc);
+        }
 
-                Map<String, Object> arguments = new HashMap<>();
-                if (node.has("arguments") && !node.get("arguments").isNull()) {
-                    JsonNode argsNode = node.get("arguments");
-                    if (argsNode.isObject()) {
-                        Iterator<Map.Entry<String, JsonNode>> fields = argsNode.fields();
-                        while (fields.hasNext()) {
-                            Map.Entry<String, JsonNode> field = fields.next();
-                            JsonNode val = field.getValue();
-                            if (val.isTextual()) {
-                                arguments.put(field.getKey(), val.asText());
-                            } else if (val.isNumber()) {
-                                arguments.put(field.getKey(), val.numberValue());
-                            } else if (val.isBoolean()) {
-                                arguments.put(field.getKey(), val.asBoolean());
-                            } else {
-                                // For arrays/objects, store as string representation
-                                arguments.put(field.getKey(), val.toString());
-                            }
-                        }
-                    }
+        // Second try: if no tagged tool calls found, look for bare JSON tool calls
+        if (toolCalls.isEmpty()) {
+            Matcher bareMatcher = BARE_TOOL_CALL_PATTERN.matcher(text);
+            while (bareMatcher.find()) {
+                String fullMatch = bareMatcher.group(0);
+                ToolCall tc = parseToolCallJson(fullMatch);
+                if (tc != null && !"none".equalsIgnoreCase(tc.getName())) {
+                    toolCalls.add(tc);
                 }
+            }
+        }
 
-                String id = "tc_" + UUID.randomUUID().toString().substring(0, 8);
-                toolCalls.add(new ToolCall(id, name, arguments));
-            } catch (Exception e) {
-                logger.warning("Skipping malformed tool_call JSON: " + jsonStr + " — " + e.getMessage());
+        // Third try: if still nothing, try parsing the entire trimmed text as a JSON tool call
+        if (toolCalls.isEmpty()) {
+            String trimmed = text.trim();
+            // Check if the whole response looks like a JSON tool call
+            if (trimmed.startsWith("{") && trimmed.contains("\"name\"") && trimmed.contains("\"arguments\"")) {
+                ToolCall tc = parseToolCallJson(trimmed);
+                if (tc != null && !"none".equalsIgnoreCase(tc.getName())) {
+                    toolCalls.add(tc);
+                }
             }
         }
 
         return toolCalls;
+    }
+
+    /**
+     * Parse a single JSON string into a ToolCall object.
+     * Returns null if parsing fails or name is missing.
+     */
+    private ToolCall parseToolCallJson(String jsonStr) {
+        try {
+            JsonNode node = mapper.readTree(jsonStr);
+            String name = node.has("name") ? node.get("name").asText() : null;
+            if (name == null || name.isEmpty()) {
+                logger.warning("Skipping tool_call block with missing 'name': " + jsonStr);
+                return null;
+            }
+
+            Map<String, Object> arguments = new HashMap<>();
+            if (node.has("arguments") && !node.get("arguments").isNull()) {
+                JsonNode argsNode = node.get("arguments");
+                if (argsNode.isObject()) {
+                    Iterator<Map.Entry<String, JsonNode>> fields = argsNode.fields();
+                    while (fields.hasNext()) {
+                        Map.Entry<String, JsonNode> field = fields.next();
+                        JsonNode val = field.getValue();
+                        if (val.isTextual()) {
+                            arguments.put(field.getKey(), val.asText());
+                        } else if (val.isNumber()) {
+                            arguments.put(field.getKey(), val.numberValue());
+                        } else if (val.isBoolean()) {
+                            arguments.put(field.getKey(), val.asBoolean());
+                        } else {
+                            arguments.put(field.getKey(), val.toString());
+                        }
+                    }
+                }
+            }
+
+            String id = "tc_" + UUID.randomUUID().toString().substring(0, 8);
+            return new ToolCall(id, name, arguments);
+        } catch (Exception e) {
+            logger.warning("Skipping malformed tool_call JSON: " + jsonStr + " — " + e.getMessage());
+            return null;
+        }
     }
 
     @Override
