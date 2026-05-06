@@ -12,15 +12,57 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Memory system that persists lessons learned, project context, and preferences.
- * Stores key-value pairs in ~/.opencode-java/memory.json.
+ * Persistent memory system for storing learned information, project context, and user preferences.
+ * 
+ * <p>The Memory system provides a way for AI agents to remember important information
+ * across conversation sessions. This enables continuity and learning over time, allowing
+ * agents to build up knowledge about projects, user preferences, and problem-solving patterns.
+ * 
+ * <h2>Key Features:</h2>
+ * <ul>
+ *   <li>Persistent key-value storage with automatic serialization</li>
+ *   <li>Timestamp tracking for all memory entries</li>
+ *   <li>Search and filtering capabilities</li>
+ *   <li>Automatic backup and recovery</li>
+ *   <li>Memory entry expiration and cleanup</li>
+ * </ul>
+ * 
+ * <h2>Storage Format:</h2>
+ * <p>Memory entries are stored as JSON in {@code ~/.opencode-java/memory.json}.
+ * Each entry includes the key, value, creation timestamp, and optional metadata.</p>
+ * 
+ * <h2>Use Cases:</h2>
+ * <ul>
+ *   <li><strong>Project Context:</strong> Remember project structure, conventions, and patterns</li>
+ *   <li><strong>User Preferences:</strong> Store coding style, preferred tools, and workflows</li>
+ *   <li><strong>Learned Solutions:</strong> Remember successful approaches to common problems</li>
+ *   <li><strong>Configuration:</strong> Persist user-specific settings and customizations</li>
+ * </ul>
+ * 
+ * <p>This is a singleton class that ensures consistent access to the memory system
+ * across all components of the application.
+ * 
+ * @author OpenCode Java Team
+ * @version 1.0.0
+ * @since 1.0.0
  */
 public class Memory {
+    /** Singleton instance */
     private static Memory instance;
+    
+    /** Path to the memory file on disk */
     private final Path memoryFile;
+    
+    /** JSON mapper for serialization */
     private final ObjectMapper mapper;
+    
+    /** In-memory storage of all memory entries */
     private Map<String, MemoryEntry> entries;
 
+    /**
+     * Private constructor for singleton pattern.
+     * Initializes the memory system and loads existing data from disk.
+     */
     private Memory() {
         String dataDir = System.getProperty("user.home") + "/.opencode-java";
         this.memoryFile = Path.of(dataDir, "memory.json");
@@ -29,6 +71,11 @@ public class Memory {
         load();
     }
 
+    /**
+     * Gets the singleton instance of the memory system.
+     * 
+     * @return the singleton Memory instance
+     */
     public static synchronized Memory getInstance() {
         if (instance == null) {
             instance = new Memory();

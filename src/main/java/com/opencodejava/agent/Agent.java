@@ -16,24 +16,78 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Core agent that processes messages through an LLM with tool calling.
- * Supports multi-depth subagents, auto-retry on failures, and iterative
- * tool use loops for handling complex multi-step tasks.
+ * Core AI agent that processes user messages through an LLM with tool calling capabilities.
+ * 
+ * <p>This class represents an intelligent agent that can:
+ * <ul>
+ *   <li>Process natural language messages through configured LLM providers</li>
+ *   <li>Execute tools (file operations, bash commands, web search, etc.)</li>
+ *   <li>Maintain conversation history and context</li>
+ *   <li>Create subagents for complex multi-step tasks</li>
+ *   <li>Handle automatic retry logic on failures</li>
+ *   <li>Perform iterative tool use loops for complex problem solving</li>
+ * </ul>
+ * 
+ * <p>The agent supports a hierarchical structure with configurable depth limits
+ * to prevent infinite recursion. Each agent maintains its own conversation history
+ * and can spawn subagents when needed for specialized tasks.
+ * 
+ * <h2>Safety Features:</h2>
+ * <ul>
+ *   <li>Maximum depth limit ({@value #MAX_DEPTH}) to prevent infinite agent creation</li>
+ *   <li>Tool iteration limit ({@value #MAX_TOOL_ITERATIONS}) to prevent endless loops</li>
+ *   <li>Retry mechanism ({@value #MAX_RETRIES}) for handling transient failures</li>
+ *   <li>Error threshold ({@value #HANDOFF_ERROR_THRESHOLD}) for agent handoff</li>
+ * </ul>
+ * 
+ * @author OpenCode Java Team
+ * @version 1.0.0
+ * @since 1.0.0
  */
 public class Agent {
+    /** Agent configuration including name, prompt, and available tools */
     private final AgentConfig config;
+    
+    /** LLM provider for generating responses */
     private final LLMProvider provider;
+    
+    /** Registry of available tools this agent can use */
     private final ToolRegistry toolRegistry;
+    
+    /** Conversation history maintained by this agent */
     private final List<Message> conversationHistory;
+    
+    /** List of subagents created by this agent */
     private final List<Agent> subagents;
+    
+    /** Memory entries accessible to this agent */
     private final List<String> memories;
+    
+    /** Current depth level in the agent hierarchy */
     private final int depth;
+    
+    /** Counter for consecutive errors, used for handoff logic */
     private int consecutiveErrorCount;
+    
+    /** Maximum allowed depth for agent hierarchy */
     private static final int MAX_DEPTH = 5;
+    
+    /** Maximum number of tool iterations to prevent infinite loops */
     private static final int MAX_TOOL_ITERATIONS = 50; // Higher limit for complex tasks
+    
+    /** Maximum number of retries for failed operations */
     private static final int MAX_RETRIES = 3;
+    
+    /** Error threshold for triggering agent handoff */
     private static final int HANDOFF_ERROR_THRESHOLD = 3;
 
+    /**
+     * Creates a new top-level agent with depth 0.
+     * 
+     * @param config the agent configuration
+     * @param provider the LLM provider
+     * @param toolRegistry the tool registry
+     */
     public Agent(AgentConfig config, LLMProvider provider, ToolRegistry toolRegistry) {
         this(config, provider, toolRegistry, 0);
     }

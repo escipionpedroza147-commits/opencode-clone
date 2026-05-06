@@ -14,28 +14,85 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Configuration manager for the OpenCode Java application.
+ * 
+ * <p>This singleton class manages all application configuration including:
+ * <ul>
+ *   <li>LLM provider settings (API keys, endpoints, models)</li>
+ *   <li>Agent configurations (build, plan, general agents)</li>
+ *   <li>User-defined commands and skills</li>
+ *   <li>Working and data directories</li>
+ *   <li>Skills directories for loading custom capabilities</li>
+ * </ul>
+ * 
+ * <p>Configuration is loaded from JSON files in the following order:
+ * <ol>
+ *   <li>Default configuration from resources</li>
+ *   <li>Project-specific opencode.json file</li>
+ *   <li>User home directory ~/.opencode-java/opencode.json</li>
+ * </ol>
+ * 
+ * <p>The configuration supports environment variable substitution using the
+ * {@code ${VARIABLE_NAME}} syntax in JSON values.
+ * 
+ * @author OpenCode Java Team
+ * @version 1.0.0
+ * @since 1.0.0
+ */
 public class Config {
+    /** Singleton instance */
     private static Config instance;
+    
+    /** JSON object mapper for configuration parsing */
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /** LLM provider configuration (API keys, endpoints, models) */
     private ProviderConfig providerConfig;
+    
+    /** Map of agent name to agent configuration */
     private Map<String, AgentConfig> agents;
+    
+    /** User-defined custom commands */
     private Map<String, Map<String, String>> userCommands;
+    
+    /** User-defined custom skills */
     private Map<String, Map<String, String>> userSkills;
+    
+    /** List of directories to search for skills */
+    private List<String> skillsDirs;
+    
+    /** Current working directory */
     private String workingDirectory;
+    
+    /** Data directory for persistent storage */
     private String dataDirectory;
+    
+    /** Currently active LLM provider */
     private String activeProvider;
+    
+    /** Currently active model */
     private String activeModel;
 
+    /**
+     * Private constructor for singleton pattern.
+     * Initializes default values and loads default configuration.
+     */
     private Config() {
         this.agents = new LinkedHashMap<>();
         this.userCommands = new LinkedHashMap<>();
         this.userSkills = new LinkedHashMap<>();
+        this.skillsDirs = new ArrayList<>();
         this.workingDirectory = System.getProperty("user.dir");
         this.dataDirectory = System.getProperty("user.home") + "/.opencode-java";
         loadDefaults();
     }
 
+    /**
+     * Gets the singleton instance of the configuration manager.
+     * 
+     * @return the singleton Config instance
+     */
     public static synchronized Config getInstance() {
         if (instance == null) {
             instance = new Config();
@@ -43,6 +100,16 @@ public class Config {
         return instance;
     }
 
+    /**
+     * Loads default configuration values including provider settings and built-in agents.
+     * 
+     * <p>Sets up:
+     * <ul>
+     *   <li>Default OpenRouter provider configuration</li>
+     *   <li>Built-in agents: build, plan, and general</li>
+     *   <li>Environment variable checking for API keys</li>
+     * </ul>
+     */
     private void loadDefaults() {
         // Load default provider config
         providerConfig = new ProviderConfig();
@@ -195,6 +262,7 @@ public class Config {
                 JsonNode cmdNode = entry.getValue();
                 if (cmdNode.has("description")) cmdDef.put("description", cmdNode.get("description").asText());
                 if (cmdNode.has("script")) cmdDef.put("script", cmdNode.get("script").asText());
+                if (cmdNode.has("prompt")) cmdDef.put("prompt", cmdNode.get("prompt").asText());
                 if (cmdNode.has("timeout")) cmdDef.put("timeout", cmdNode.get("timeout").asText());
                 userCommands.put(entry.getKey(), cmdDef);
             }
@@ -214,6 +282,16 @@ public class Config {
                 if (skillNode.has("system_prompt")) skillDef.put("system_prompt", skillNode.get("system_prompt").asText());
                 if (skillNode.has("timeout")) skillDef.put("timeout", skillNode.get("timeout").asText());
                 userSkills.put(entry.getKey(), skillDef);
+            }
+        }
+
+        // Load skills_dirs for OpenClaw-style SKILL.md loading
+        if (root.has("skills_dirs")) {
+            JsonNode dirsNode = root.get("skills_dirs");
+            if (dirsNode.isArray()) {
+                for (JsonNode dirNode : dirsNode) {
+                    skillsDirs.add(dirNode.asText());
+                }
             }
         }
 
@@ -248,6 +326,7 @@ public class Config {
     public Map<String, AgentConfig> getAgents() { return agents; }
     public Map<String, Map<String, String>> getUserCommands() { return userCommands; }
     public Map<String, Map<String, String>> getUserSkills() { return userSkills; }
+    public List<String> getSkillsDirs() { return skillsDirs; }
     public String getWorkingDirectory() { return workingDirectory; }
     public String getDataDirectory() { return dataDirectory; }
     public String getActiveProvider() { return activeProvider; }

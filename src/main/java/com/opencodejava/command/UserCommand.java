@@ -28,16 +28,24 @@ public class UserCommand implements Command {
     private final String name;
     private final String description;
     private final String script;
+    private final String prompt;
     private final String workingDirectory;
     private final int timeoutSeconds;
 
-    public UserCommand(String name, String description, String script,
+    public UserCommand(String name, String description, String script, String prompt,
                        String workingDirectory, int timeoutSeconds) {
         this.name = name;
         this.description = description != null ? description : "User command: " + name;
         this.script = script;
+        this.prompt = prompt;
         this.workingDirectory = workingDirectory;
         this.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : 60;
+    }
+
+    /** Backward-compatible constructor without prompt. */
+    public UserCommand(String name, String description, String script,
+                       String workingDirectory, int timeoutSeconds) {
+        this(name, description, script, null, workingDirectory, timeoutSeconds);
     }
 
     @Override
@@ -49,10 +57,25 @@ public class UserCommand implements Command {
     @Override
     public String getUsage() { return "/" + name + " [arguments]"; }
 
+    /** Returns true if this is a prompt-based command (sends to the active agent). */
+    public boolean isPromptCommand() { return prompt != null && !prompt.isEmpty(); }
+
+    /** Get the prompt text for prompt-based commands. */
+    public String getPrompt() { return prompt; }
+
     @Override
     public String execute(String[] args) {
+        // Prompt-based commands return the prompt for the agent to process
+        if (isPromptCommand()) {
+            StringBuilder fullPrompt = new StringBuilder(prompt);
+            for (String arg : args) {
+                fullPrompt.append(" ").append(arg);
+            }
+            return "__PROMPT__" + fullPrompt;
+        }
+
         if (script == null || script.isEmpty()) {
-            return "Error: No script configured for command /" + name;
+            return "Error: No script or prompt configured for command /" + name;
         }
 
         // Build command with arguments

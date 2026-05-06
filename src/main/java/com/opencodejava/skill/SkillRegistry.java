@@ -1,5 +1,6 @@
 package com.opencodejava.skill;
 
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -92,7 +93,8 @@ public class SkillRegistry {
      * Create default registry with built-in skills.
      * Includes langchain4j-skills-shell and langchain4j-experimental-skills-shell.
      */
-    public static SkillRegistry createDefault(String workingDirectory, Map<String, Map<String, String>> userSkillDefs) {
+    public static SkillRegistry createDefault(String workingDirectory, Map<String, Map<String, String>> userSkillDefs,
+                                                    java.util.List<String> extraSkillsDirs) {
         SkillRegistry registry = new SkillRegistry();
 
         // Built-in: langchain4j-experimental-skills-shell
@@ -104,7 +106,7 @@ public class SkillRegistry {
         // Built-in: basic shell (backward compat)
         registry.register(new ShellSkill(workingDirectory));
 
-        // Load user-defined skills
+        // Load user-defined skills from config
         if (userSkillDefs != null) {
             for (Map.Entry<String, Map<String, String>> entry : userSkillDefs.entrySet()) {
                 String name = entry.getKey();
@@ -125,6 +127,21 @@ public class SkillRegistry {
             }
         }
 
+        // Load OpenClaw-style SKILL.md files from standard directories
+        String home = System.getProperty("user.home");
+        MarkdownSkillLoader.loadFromDirectory(Path.of(home, ".opencode-java", "skills"), registry);
+        MarkdownSkillLoader.loadFromDirectory(Path.of(workingDirectory, "skills"), registry);
+
+        // Load from extra configured skills_dirs
+        MarkdownSkillLoader.loadFromDirectories(extraSkillsDirs, registry);
+
         return registry;
+    }
+
+    /**
+     * Backward-compatible overload without extra dirs.
+     */
+    public static SkillRegistry createDefault(String workingDirectory, Map<String, Map<String, String>> userSkillDefs) {
+        return createDefault(workingDirectory, userSkillDefs, null);
     }
 }

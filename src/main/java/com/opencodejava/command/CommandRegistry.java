@@ -45,11 +45,12 @@ public class CommandRegistry {
             Map<String, String> def = entry.getValue();
             String description = def.get("description");
             String script = def.get("script");
+            String prompt = def.get("prompt");
             int timeout = 60;
             if (def.containsKey("timeout")) {
                 try { timeout = Integer.parseInt(def.get("timeout")); } catch (NumberFormatException ignored) {}
             }
-            register(new UserCommand(name, description, script,
+            register(new UserCommand(name, description, script, prompt,
                     app.getConfig().getWorkingDirectory(), timeout));
         }
     }

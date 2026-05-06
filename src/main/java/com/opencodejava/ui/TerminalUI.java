@@ -95,7 +95,13 @@ public class TerminalUI {
                 if (commandRegistry.isCommand(input)) {
                     String result = commandRegistry.executeCommand(input);
                     if (result != null) {
-                        printSystem(result);
+                        if (result.startsWith("__PROMPT__")) {
+                            // Prompt-based command — send to active agent
+                            String promptText = result.substring("__PROMPT__".length());
+                            processUserMessage(promptText);
+                        } else {
+                            printSystem(result);
+                        }
                     }
                 } else {
                     processUserMessage(input);

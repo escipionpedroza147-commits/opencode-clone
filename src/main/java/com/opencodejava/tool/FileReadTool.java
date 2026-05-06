@@ -8,6 +8,42 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/**
+ * Tool for reading file contents with support for line range selection.
+ * 
+ * <p>This tool provides safe file reading capabilities with the following features:
+ * <ul>
+ *   <li>Read entire files or specific line ranges</li>
+ *   <li>File size validation (1MB limit for safety)</li>
+ *   <li>Path validation and security checks</li>
+ *   <li>Comprehensive error handling</li>
+ * </ul>
+ * 
+ * <p>The tool supports three reading modes:
+ * <ol>
+ *   <li><strong>Full file:</strong> Read entire file contents</li>
+ *   <li><strong>Line range:</strong> Read specific lines using start_line and end_line</li>
+ *   <li><strong>From line:</strong> Read from start_line to end of file</li>
+ * </ol>
+ * 
+ * <h2>Parameters:</h2>
+ * <ul>
+ *   <li><code>path</code> (required): File path to read</li>
+ *   <li><code>start_line</code> (optional): Starting line number (1-indexed)</li>
+ *   <li><code>end_line</code> (optional): Ending line number (inclusive)</li>
+ * </ul>
+ * 
+ * <h2>Safety Features:</h2>
+ * <ul>
+ *   <li>File size limit of 1MB to prevent memory issues</li>
+ *   <li>Path validation to ensure file exists and is readable</li>
+ *   <li>Line number validation to prevent invalid ranges</li>
+ * </ul>
+ * 
+ * @author OpenCode Java Team
+ * @version 1.0.0
+ * @since 1.0.0
+ */
 public class FileReadTool implements Tool {
 
     @Override

@@ -2,6 +2,106 @@
   "provider": {
     "type": "lmstudio",
     "base_url": "http://127.0.0.1:1234/v1",
-    "model": "qwen2.5-3b-instruct"
+    "model": "qwen2.5-coder-3b-instruct-mlx",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "agents": {
+    "build": {
+      "description": "Full-access coding agent with all tools",
+      "tools": ["file_read", "file_write", "file_edit", "bash", "search", "list_files", "git", "web_search", "web_fetch", "image_gen"]
+    },
+    "plan": {
+      "description": "Read-only analysis and planning agent",
+      "tools": ["file_read", "search", "list_files", "web_search", "web_fetch"],
+      "read_only": true
+    },
+    "general": {
+      "description": "General-purpose assistant for research and multistep tasks",
+      "tools": ["file_read", "bash", "search", "list_files", "git", "web_search", "web_fetch"]
+    },
+    "security": {
+      "description": "Security auditor - scans code for vulnerabilities and bad practices",
+      "system_prompt": "You are a security-focused code auditor. Analyze code for SQL injection, XSS, path traversal, hardcoded secrets, insecure dependencies, and other OWASP Top 10 vulnerabilities. Be specific about line numbers and suggest fixes.",
+      "tools": ["file_read", "search", "list_files", "bash"],
+      "read_only": true
+    },
+    "refactor": {
+      "description": "Code refactoring specialist - improves structure without changing behavior",
+      "system_prompt": "You are a refactoring specialist. Improve code quality: extract methods, reduce duplication, apply design patterns, improve naming, simplify logic. Always verify behavior is preserved. Run tests before and after changes.",
+      "tools": ["file_read", "file_write", "file_edit", "bash", "search", "list_files", "git"]
+    },
+    "docs": {
+      "description": "Documentation writer - generates javadoc, README, and guides",
+      "system_prompt": "You are a technical documentation writer. Write clear javadoc comments, README sections, API docs, and usage guides. Use proper markdown formatting. Include code examples where helpful.",
+      "tools": ["file_read", "file_write", "file_edit", "search", "list_files"]
+    },
+    "debug": {
+      "description": "Debugger agent - traces bugs, analyzes stack traces, finds root causes",
+      "system_prompt": "You are a debugging expert. Analyze error messages, stack traces, and unexpected behavior. Trace execution flow, check variable states, identify race conditions, and find root causes. Suggest targeted fixes.",
+      "tools": ["file_read", "bash", "search", "list_files", "git"]
+    },
+    "test": {
+      "description": "Test writer - generates unit tests, integration tests, and test fixtures",
+      "system_prompt": "You are a test engineering specialist. Write JUnit 5 tests with Mockito mocks. Cover edge cases, error paths, and boundary conditions. Aim for high coverage. Use descriptive test names that explain the scenario.",
+      "tools": ["file_read", "file_write", "file_edit", "bash", "search", "list_files"]
+    }
+  },
+  "commands": {
+    "test": {
+      "description": "Run project tests",
+      "script": "mvn test",
+      "timeout": "300"
+    },
+    "build": {
+      "description": "Build the project",
+      "script": "mvn clean package -DskipTests",
+      "timeout": "120"
+    },
+    "quick-build": {
+      "description": "Fast incremental build",
+      "script": "mvn compile",
+      "timeout": "60"
+    },
+    "clean": {
+      "description": "Clean project artifacts",
+      "script": "mvn clean",
+      "timeout": "30"
+    },
+    "run": {
+      "description": "Run the application",
+      "script": "mvn exec:java -Dexec.mainClass=com.opencodejava.core.Main",
+      "timeout": "180"
+    },
+    "deps": {
+      "description": "Show dependency tree",
+      "script": "mvn dependency:tree",
+      "timeout": "60"
+    },
+    "format": {
+      "description": "Format code with Google Java Format",
+      "script": "find src -name '*.java' -exec google-java-format --replace {} +",
+      "timeout": "120"
+    },
+    "git-status": {
+      "description": "Enhanced git status with file details",
+      "script": "git status --porcelain && echo '---' && git log --oneline -5",
+      "timeout": "30"
+    },
+    "find-todos": {
+      "description": "Find TODO comments in source code",
+      "script": "grep -r 'TODO\\|FIXME\\|XXX' src/ --include='*.java' || echo 'No TODOs found!'",
+      "timeout": "30"
+    },
+    "count-lines": {
+      "description": "Count lines of code",
+      "script": "find src -name '*.java' | xargs wc -l | tail -1",
+      "timeout": "30"
+    },
+    "jack": {
+      "description": "Ask the AI to explain what being a jackass means",
+      "prompt": "Explain to your uncle what being a jackass means. Be informative, humorous, and family-friendly in your explanation.",
+      "timeout": "30"
+    }
   }
 }

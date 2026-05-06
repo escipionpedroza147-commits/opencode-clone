@@ -1,0 +1,54 @@
+{
+  "commands": {
+    "deploy-staging": {
+      "description": "Deploy to staging environment",
+      "script": "./scripts/deploy.sh staging",
+      "timeout": 300
+    },
+    "db-migrate": {
+      "description": "Run database migrations",
+      "script": "mvn flyway:migrate",
+      "timeout": 120
+    },
+    "security-scan": {
+      "description": "Run security vulnerability scan",
+      "script": "mvn org.owasp:dependency-check-maven:check",
+      "timeout": 600
+    },
+    "performance-test": {
+      "description": "Run performance benchmarks",
+      "script": "mvn test -Dtest=**/*PerformanceTest",
+      "timeout": 900
+    },
+    "api-docs": {
+      "description": "Generate API documentation",
+      "script": "mvn javadoc:javadoc && open target/site/apidocs/index.html",
+      "timeout": 60
+    },
+    "log-tail": {
+      "description": "Tail application logs",
+      "script": "tail -f logs/application.log",
+      "timeout": 0
+    },
+    "env-check": {
+      "description": "Check environment setup",
+      "script": "java -version && mvn -version && docker --version",
+      "timeout": 30
+    },
+    "quick-test": {
+      "description": "Run only unit tests (fast)",
+      "script": "mvn test -Dgroups=unit",
+      "timeout": 120
+    },
+    "integration-test": {
+      "description": "Run integration tests",
+      "script": "mvn test -Dgroups=integration",
+      "timeout": 600
+    },
+    "coverage": {
+      "description": "Generate test coverage report",
+      "script": "mvn jacoco:report && open target/site/jacoco/index.html",
+      "timeout": 180
+    }
+  }
+}
